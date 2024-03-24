@@ -1,6 +1,7 @@
 use all_asserts::assert_lt;
 use ark_bls12_381::G1Affine;
-use ark_ff::{field_new, BigInteger256, PrimeField};
+use ark_ec::AffineRepr;
+use ark_ff::{BigInt, MontFp};
 use ark_std::Zero;
 use num_bigint::BigUint;
 
@@ -18,7 +19,7 @@ pub fn decompose_slow(scalar: &G1ScalarField) -> (G1ScalarField, G1ScalarField) 
     // 2**256 // LAMBDA
     let inv_approx: BigUint =
         BigUint::parse_bytes(b"17c6becf1e01faadd63f6e522f6cfee30", 16).unwrap();
-    let s: BigUint = scalar.into_repr().into();
+    let s: BigUint = scalar.0.into();
     let s_hi = s.clone() >> 128;
     let mut quotient: BigUint = (s_hi * inv_approx) >> 128;
     let mut remainder: BigUint = s - quotient.clone() * LAMBDA;
@@ -109,9 +110,12 @@ pub fn decompose(
         is_neg_remainder = glv_post_processing(&mut quotient0, &mut quotient1, &mut r0, &mut r1);
     }
 
+    let big_integer_quotient = BigInt::new([quotient0 as u64, quotient1 as u64, 0, 0]);
+    let big_integer_r = BigInt::new([r0, r1, 0, 0]);
+
     (
-        G1ScalarField::from(BigInteger256([quotient0 as u64, quotient1 as u64, 0, 0])),
-        G1ScalarField::from(BigInteger256([r0, r1, 0, 0])),
+        G1ScalarField::from(big_integer_quotient),
+        G1ScalarField::from(big_integer_r),
         is_neg_scalar,
         is_neg_remainder,
     )
@@ -139,10 +143,10 @@ fn glv_preprocess_scalar(
     window_bits: u32,
 ) -> (u128, u128, u128, u128, bool) {
     let mut s = [
-        scalar.into_repr().as_ref()[0],
-        scalar.into_repr().as_ref()[1],
-        scalar.into_repr().as_ref()[2],
-        scalar.into_repr().as_ref()[3],
+        scalar.0.0[0],
+        scalar.0.0[1],
+        scalar.0.0[2],
+        scalar.0.0[3],
     ];
 
     let mut is_neg_scalar = false;
@@ -201,7 +205,7 @@ fn glv_post_processing(q0: &mut u128, q1: &mut u128, r0: &mut u64, r1: &mut u64)
     false
 }
 
-const BETA: G1BaseField = field_new!(G1BaseField, "4002409555221667392624310435006688643935503118305586438271171395842971157480381377015405980053539358417135540939436");
+const BETA: G1BaseField = MontFp!("4002409555221667392624310435006688643935503118305586438271171395842971157480381377015405980053539358417135540939436");
 
 // lambda * (x, y) = (beta * x, y)
 pub fn endomorphism(point: &mut G1Affine) {
