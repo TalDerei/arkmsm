@@ -1,9 +1,7 @@
-use ark_bls12_381::g1::Parameters as G1Parameters;
+use ark_bls12_381::g1::Config as G1Parameters;
 use ark_bls12_381::G1Affine;
 use ark_ec::{
-    models::SWModelParameters as Parameters,
-    short_weierstrass_jacobian::{GroupAffine, GroupProjective},
-    ProjectiveCurve,
+    models::short_weierstrass::SWCurveConfig as Parameters, short_weierstrass::{Affine, Projective}, AffineRepr, CurveGroup, Group
 };
 use ark_std::Zero;
 use std::any::TypeId;
@@ -21,13 +19,13 @@ pub struct BucketMSM<P: Parameters> {
     bucket_bits: u32,
     max_batch_cnt: u32, // max slices allowed in a batch
     max_collision_cnt: u32,
-    buckets: Vec<GroupAffine<P>>, // size (num_windows << window_bits) * 2
+    buckets: Vec<Affine<P>>, // size (num_windows << window_bits) * 2
 
     // current batch state
     bitmap: Bitmap,
     batch_buckets_and_points: Vec<(u32, u32)>,
-    collision_buckets_and_points: Vec<(u32, GroupAffine<P>)>,
-    cur_points: Vec<GroupAffine<P>>, // points of current batch, size batch_size
+    collision_buckets_and_points: Vec<(u32, Affine<P>)>,
+    cur_points: Vec<Affine<P>>, // points of current batch, size batch_size
 
     // batch affine adder
     batch_adder: BatchAdder<P>,
@@ -53,12 +51,12 @@ impl<P: Parameters> BucketMSM<P> {
             bucket_bits,
             max_batch_cnt,
             max_collision_cnt,
-            buckets: vec![GroupAffine::<P>::zero(); bucket_size as usize],
+            buckets: vec![Affine::<P>::zero(); bucket_size as usize],
 
             bitmap: Bitmap::new(bucket_size as usize / 32),
             batch_buckets_and_points: Vec::with_capacity(batch_size as usize),
             collision_buckets_and_points: Vec::with_capacity(max_collision_cnt as usize),
-            cur_points: vec![GroupAffine::<P>::zero(); batch_size as usize],
+            cur_points: vec![Affine::<P>::zero(); batch_size as usize],
 
             batch_adder: BatchAdder::new(batch_adder_size as usize),
         }
@@ -66,7 +64,7 @@ impl<P: Parameters> BucketMSM<P> {
 
     pub fn process_point_and_slices_glv(
         &mut self,
-        point: &GroupAffine<P>,
+        point: &Affine<P>,
         normal_slices: &[u32],
         phi_slices: &[u32],
         is_neg_scalar: bool,
@@ -148,7 +146,7 @@ impl<P: Parameters> BucketMSM<P> {
         }
     }
 
-    pub fn process_point_and_slices(&mut self, point: &GroupAffine<P>, slices: &[u32]) {
+    pub fn process_point_and_slices(&mut self, point: &Affine<P>, slices: &[u32]) {
         assert!(
             self.num_windows as usize == slices.len(),
             "slices.len() {} should equal num_windows {}",
@@ -245,12 +243,12 @@ impl<P: Parameters> BucketMSM<P> {
         self.cur_points.push(slicing_point.unwrap());
     }
 
-    pub fn batch_reduce(&mut self) -> GroupProjective<P> {
+    pub fn batch_reduce(&mut self) -> Projective<P> {
         let window_starts: Vec<_> = (0..self.num_windows as usize).collect();
         let num_groups =
             (self.num_windows as usize) << (self.bucket_bits as usize - GROUP_SIZE_IN_BITS);
-        let mut running_sums: Vec<_> = vec![GroupAffine::<P>::zero(); num_groups];
-        let mut sum_of_sums: Vec<_> = vec![GroupAffine::<P>::zero(); num_groups];
+        let mut running_sums: Vec<_> = vec![Affine::<P>::zero(); num_groups];
+        let mut sum_of_sums: Vec<_> = vec![Affine::<P>::zero(); num_groups];
 
         // calculate running sum and sum of sum for each group
         for i in (0..GROUP_SIZE).rev() {
@@ -266,7 +264,7 @@ impl<P: Parameters> BucketMSM<P> {
             self.batch_adder.batch_add(&mut sum_of_sums, &running_sums);
         }
 
-        let sum_by_window: Vec<GroupProjective<P>> = ark_std::cfg_into_iter!(window_starts)
+        let sum_by_window: Vec<Projective<P>> = ark_std::cfg_into_iter!(window_starts)
             .map(|w_start| {
                 let group_start = w_start << (self.bucket_bits as usize - GROUP_SIZE_IN_BITS);
                 let group_end = (w_start + 1) << (self.bucket_bits as usize - GROUP_SIZE_IN_BITS);
@@ -282,17 +280,17 @@ impl<P: Parameters> BucketMSM<P> {
 
     fn inner_window_reduce(
         &mut self,
-        running_sums: &[GroupAffine<P>],
-        sum_of_sums: &[GroupAffine<P>],
-    ) -> GroupProjective<P> {
+        running_sums: &[Affine<P>],
+        sum_of_sums: &[Affine<P>],
+    ) -> Projective<P> {
         self.calc_sum_of_sum_total(sum_of_sums) + self.calc_running_sum_total(running_sums)
     }
 
-    fn calc_running_sum_total(&mut self, running_sums: &[GroupAffine<P>]) -> GroupProjective<P> {
-        let mut running_sum_total = GroupProjective::<P>::zero();
+    fn calc_running_sum_total(&mut self, running_sums: &[Affine<P>]) -> Projective<P> {
+        let mut running_sum_total = Projective::<P>::zero();
         for (i, running_sum) in running_sums.iter().enumerate().skip(1) {
             for _ in 0..i {
-                running_sum_total.add_assign_mixed(running_sum);
+                running_sum_total += running_sum;
             }
         }
 
@@ -302,20 +300,20 @@ impl<P: Parameters> BucketMSM<P> {
         running_sum_total
     }
 
-    fn calc_sum_of_sum_total(&mut self, sum_of_sums: &[GroupAffine<P>]) -> GroupProjective<P> {
-        let mut sum = GroupProjective::<P>::zero();
-        sum_of_sums.iter().for_each(|p| sum.add_assign_mixed(p));
+    fn calc_sum_of_sum_total(&mut self, sum_of_sums: &[Affine<P>]) -> Projective<P> {
+        let mut sum = Projective::<P>::zero();
+        sum_of_sums.iter().for_each(|p| sum += p);
         sum
     }
 
-    fn intra_window_reduce(&mut self, window_sums: &[GroupProjective<P>]) -> GroupProjective<P> {
+    fn intra_window_reduce(&mut self, window_sums: &[Projective<P>]) -> Projective<P> {
         // We store the sum for the lowest window.
         let lowest = *window_sums.first().unwrap();
 
         // We're traversing windows from high to low.
         lowest
             + window_sums.iter().skip(1).rev().fold(
-                GroupProjective::<P>::zero(),
+                Projective::<P>::zero(),
                 |mut total, sum_i| {
                     total += sum_i;
                     for _ in 0..self.window_bits {

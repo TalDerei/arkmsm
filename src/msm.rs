@@ -3,10 +3,10 @@ use crate::{
     glv::decompose,
     types::{BigInt, G1BigInt, G1_SCALAR_SIZE_GLV, GROUP_SIZE_IN_BITS},
 };
-use ark_bls12_381::{g1::Parameters as G1Parameters, Fr};
+use ark_bls12_381::{g1::Config as G1Parameters, Fr};
 use ark_ec::{
-    models::SWModelParameters as Parameters,
-    short_weierstrass_jacobian::{GroupAffine, GroupProjective},
+    models::short_weierstrass::SWCurveConfig as Parameters,
+    short_weierstrass::{Affine, Projective},
 };
 use ark_ff::{BigInteger, PrimeField};
 use ark_std::log2;
@@ -57,12 +57,12 @@ impl VariableBaseMSM {
     }
 
     fn multi_scalar_mul_g1_glv<P: Parameters>(
-        points: &[GroupAffine<P>],
+        points: &[Affine<P>],
         scalars: &[BigInt<P>],
         window_bits: u32,
         max_batch: u32,
         max_collisions: u32,
-    ) -> GroupProjective<P> {
+    ) -> Projective<P> {
         let num_slices: usize = ((G1_SCALAR_SIZE_GLV + window_bits - 1) / window_bits) as usize;
         let mut bucket_msm =
             BucketMSM::<P>::new(G1_SCALAR_SIZE_GLV, window_bits, max_batch, max_collisions);
@@ -107,13 +107,13 @@ impl VariableBaseMSM {
     }
 
     fn multi_scalar_mul_general<P: Parameters>(
-        points: &[GroupAffine<P>],
+        points: &[Affine<P>],
         scalars: &[BigInt<P>],
         window_bits: u32,
         max_batch: u32,
         max_collisions: u32,
-    ) -> GroupProjective<P> {
-        let scalar_size = <P::ScalarField as PrimeField>::size_in_bits() as u32;
+    ) -> Projective<P> {
+        let scalar_size = <P::ScalarField as PrimeField>::MODULUS_BIT_SIZE as u32;
         let num_slices: usize = ((scalar_size + window_bits - 1) / window_bits) as usize;
         let mut bucket_msm =
             BucketMSM::<P>::new(scalar_size, window_bits, max_batch, max_collisions);
@@ -133,13 +133,13 @@ impl VariableBaseMSM {
     }
 
     pub fn multi_scalar_mul_custom<P: Parameters>(
-        points: &[GroupAffine<P>],
+        points: &[Affine<P>],
         scalars: &[BigInt<P>],
         window_bits: u32,
         max_batch: u32,
         max_collisions: u32,
         glv_enabled: bool,
-    ) -> GroupProjective<P> {
+    ) -> Projective<P> {
         assert!(
             window_bits as usize > GROUP_SIZE_IN_BITS,
             "Window_bits must be greater than the default log(group size)"
@@ -156,9 +156,9 @@ impl VariableBaseMSM {
     }
 
     pub fn multi_scalar_mul<P: Parameters>(
-        points: &[GroupAffine<P>],
+        points: &[Affine<P>],
         scalars: &[BigInt<P>],
-    ) -> GroupProjective<P> {
+    ) -> Projective<P> {
         let opt_window_size = Self::get_opt_window_size(log2(points.len()));
         Self::multi_scalar_mul_custom(points, scalars, opt_window_size, 2048, 256, true)
     }
@@ -167,11 +167,11 @@ impl VariableBaseMSM {
 #[cfg(test)]
 mod collision_method_pippenger_tests {
     use super::*;
-    use ark_bls12_381::g1::Parameters;
+    use ark_bls12_381::g1::Config as Parameters;
 
     #[test]
     fn test_msm_slice_window_size_1() {
-        let scalar = G1BigInt::from(0b101);
+        let scalar = G1BigInt::from(0b101u64);
         let mut slices: Vec<u32> = vec![0; 3];
         VariableBaseMSM::msm_slice::<Parameters>(scalar, &mut slices, 1);
         // print!("slices {:?}\n", slices);
@@ -179,7 +179,7 @@ mod collision_method_pippenger_tests {
     }
     #[test]
     fn test_msm_slice_window_size_2() {
-        let scalar = G1BigInt::from(0b000110);
+        let scalar = G1BigInt::from(0b000110u64);
         let mut slices: Vec<u32> = vec![0; 3];
         VariableBaseMSM::msm_slice::<Parameters>(scalar, &mut slices, 2);
         assert!(slices.iter().eq([2, 1, 0].iter()));
@@ -187,7 +187,7 @@ mod collision_method_pippenger_tests {
 
     #[test]
     fn test_msm_slice_window_size_3() {
-        let scalar = G1BigInt::from(0b010111000);
+        let scalar = G1BigInt::from(0b010111000u64);
         let mut slices: Vec<u32> = vec![0; 3];
         VariableBaseMSM::msm_slice::<Parameters>(scalar, &mut slices, 3);
         assert!(slices.iter().eq([0, 0x80000001, 3].iter()));
@@ -195,7 +195,7 @@ mod collision_method_pippenger_tests {
 
     #[test]
     fn test_msm_slice_window_size_16() {
-        let scalar = G1BigInt::from(0x123400007FFF);
+        let scalar = G1BigInt::from(0x123400007FFFu64);
         let mut slices: Vec<u32> = vec![0; 3];
         VariableBaseMSM::msm_slice::<Parameters>(scalar, &mut slices, 16);
         assert!(slices.iter().eq([0x7FFF, 0, 0x1234].iter()));
